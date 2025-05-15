@@ -1,0 +1,103 @@
+name: Deploy Application
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  API_SERVICE_NAME: novelist-guide-api
+  REGION: us-central1
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend to Cloud Run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Google Auth
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Authorize Docker push
+      run: gcloud auth configure-docker
+
+    - name: Build and Push Container
+      run: |-
+        docker build -t gcr.io/$PROJECT_ID/$API_SERVICE_NAME:${{ github.sha }} .
+        docker push gcr.io/$PROJECT_ID/$API_SERVICE_NAME:${{ github.sha }}
+
+    - name: Deploy to Cloud Run
+      id: deploy
+      run: |-
+        gcloud run deploy $API_SERVICE_NAME \
+          --image gcr.io/$PROJECT_ID/$API_SERVICE_NAME:${{ github.sha }} \
+          --region $REGION \
+          --platform managed \
+          --allow-unauthenticated \
+          --set-env-vars="NODE_ENV=production"
+    
+    - name: Get Service URL
+      id: get-url
+      run: |-
+        echo "SERVICE_URL=$(gcloud run services describe $API_SERVICE_NAME --platform managed --region $REGION --format 'value(status.url)')" >> $GITHUB_OUTPUT
+
+    # Pass the backend URL to the next job
+    outputs:
+      backend_url: ${{ steps.get-url.outputs.SERVICE_URL }}
+
+  deploy-frontend:
+    name: Deploy Frontend to GitHub Pages
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Create env file
+      run: |
+        echo "EXPORT_MODE=static" > .env.production.local
+        echo "NEXT_PUBLIC_API_URL=${{ needs.deploy-backend.outputs.backend_url }}" >> .env.production.local
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build static site
+      run: npm run build
+
+    - name: Create GitHub Pages files
+      run: |
+        touch out/.nojekyll
+        # Create CNAME if you have a custom domain
+        # echo "yourdomain.com" > out/CNAME
+
+    - name: Deploy to GitHub Pages
+      uses: JamesIves/github-pages-deploy-action@v4
+      with:
+        folder: out
+        branch: gh-pages 
