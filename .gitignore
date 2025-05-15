@@ -23,11 +23,28 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
-.env*.local
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts 
+next-env.d.ts
+
+# Firebase service account keys
+*-sa-key.json
+firebase-backend-sa-key.json
+firebase-admin-key.json
+
+# Google OAuth credentials
+client_secret*.json
+google-credentials.json
+
+# Firebase config
+.firebaserc
+firebase-debug.log 
